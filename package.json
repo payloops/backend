@@ -1,0 +1,42 @@
+{
+  "name": "@payloops/backend",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts",
+    "start": "node dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.8",
+    "@hono/zod-validator": "^0.4.3",
+    "@temporalio/client": "^1.11.7",
+    "bcryptjs": "^2.4.3",
+    "drizzle-orm": "^0.39.1",
+    "hono": "^4.7.4",
+    "ioredis": "^5.4.2",
+    "jose": "^5.9.6",
+    "nanoid": "^5.0.9",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0",
+    "razorpay": "^2.9.5",
+    "stripe": "^17.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.30.4",
+    "eslint": "^9.0.0",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  }
+}
