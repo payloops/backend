@@ -98,7 +98,6 @@ Authenticated via `Authorization: Bearer <jwt>` header.
 - Node.js 22+
 - pnpm
 - PostgreSQL (via Docker or local)
-- Redis (via Docker or local)
 
 ### Setup
 
@@ -110,7 +109,7 @@ pnpm install
 cp .env.example .env
 
 # Start database (if using Docker)
-docker-compose up -d postgres redis
+docker-compose up -d postgres
 
 # Push schema to database
 pnpm db:push
@@ -138,13 +137,14 @@ pnpm dev
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `REDIS_URL` | Yes | Redis connection string |
 | `TEMPORAL_ADDRESS` | Yes | Temporal server address |
 | `TEMPORAL_NAMESPACE` | Yes | Temporal namespace |
 | `JWT_SECRET` | Yes | Secret for signing JWTs (min 32 chars) |
 | `ENCRYPTION_KEY` | Yes | Key for AES encryption (min 32 chars) |
 | `CORS_ORIGINS` | No | Allowed CORS origins (comma-separated) |
 | `PORT` | No | Server port (default: 3000) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OpenTelemetry collector endpoint (default: http://localhost:4318) |
+| `OTEL_SERVICE_NAME` | No | Service name for telemetry (default: loop-backend) |
 
 ## Database Schema
 
@@ -156,6 +156,53 @@ Key tables managed by this service:
 - **webhook_events** - Outbound webhook delivery queue
 - **api_keys** - Merchant API keys (hashed)
 - **processor_configs** - Encrypted processor credentials
+
+## Observability
+
+The backend is fully instrumented with OpenTelemetry for distributed tracing, metrics, and structured logging.
+
+### What's Collected
+
+| Type | Description |
+|------|-------------|
+| **Traces** | HTTP request spans, database queries, Temporal client calls |
+| **Metrics** | Payment attempts, amounts, latency histograms, webhook deliveries |
+| **Logs** | Structured JSON logs with trace context (`trace_id`, `span_id`, `correlationId`) |
+
+### Correlation IDs
+
+Every request receives a correlation ID that flows through the entire system:
+
+```bash
+# Pass your own correlation ID
+curl -H "X-Correlation-ID: my-trace-123" http://localhost:3000/v1/orders
+
+# Or let the system generate one (returned in X-Correlation-ID header)
+curl -v http://localhost:3000/health
+```
+
+The correlation ID is:
+- Returned in the `X-Correlation-ID` response header
+- Attached to all log entries
+- Propagated to Temporal workflows via search attributes
+- Searchable in OpenObserve and Temporal UI
+
+### Custom Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `payment_attempts_total` | Counter | `processor`, `status`, `currency` |
+| `payment_amount_total` | Counter | `processor`, `currency` |
+| `payment_latency_seconds` | Histogram | `processor`, `status` |
+| `webhook_deliveries_total` | Counter | `event_type`, `status` |
+| `webhook_latency_seconds` | Histogram | `event_type` |
+
+### Viewing in OpenObserve
+
+1. Open http://localhost:5080 (login: `admin@loop.dev` / `admin123`)
+2. **Logs**: Filter by `service: loop-backend` or search by `correlationId`
+3. **Traces**: View distributed traces across backend → Temporal
+4. **Metrics**: Query `payment_*` or `webhook_*` metrics
 
 ## Security
 
