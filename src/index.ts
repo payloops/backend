@@ -1,5 +1,5 @@
 // Initialize OpenTelemetry FIRST, before any other imports
-import { initTelemetry } from './lib/observability/otel';
+import { initTelemetry, logger } from '@payloops/observability';
 initTelemetry(process.env.OTEL_SERVICE_NAME || 'loop-backend', '0.0.1');
 
 import { serve } from '@hono/node-server';
@@ -8,7 +8,6 @@ import { cors } from 'hono/cors';
 import { prettyJSON } from 'hono/pretty-json';
 
 import { env } from './lib/env';
-import { logger } from './lib/logger';
 import { authMiddleware, type AuthContext } from './middleware/auth';
 import { tracingMiddleware, type TracingContext } from './middleware/tracing';
 

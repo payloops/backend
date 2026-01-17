@@ -4,7 +4,7 @@ import { db } from '../../db/client';
 import { orders, transactions, webhookEvents, processorConfigs } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { decrypt } from '../../lib/crypto';
-import { logger } from '../../lib/logger';
+import { logger } from '@payloops/observability';
 import { startWebhookDeliveryWorkflow } from '../../services/temporal';
 
 const app = new Hono();

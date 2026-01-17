@@ -8,7 +8,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import type { AuthContext } from '../../middleware/auth';
 import { getMerchant } from '../../middleware/auth';
 import { startPaymentWorkflow } from '../../services/temporal';
-import { logger } from '../../lib/logger';
+import { logger } from '@payloops/observability';
 
 const app = new Hono<AuthContext>();
 

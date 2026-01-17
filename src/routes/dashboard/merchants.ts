@@ -7,7 +7,7 @@ import { eq, and, desc, sql, gte, count, sum } from 'drizzle-orm';
 import type { AuthContext } from '../../middleware/auth';
 import { getMerchant, authMiddleware } from '../../middleware/auth';
 import { generateApiKey, hashApiKey, encrypt, decrypt } from '../../lib/crypto';
-import { logger } from '../../lib/logger';
+import { logger } from '@payloops/observability';
 
 const app = new Hono<AuthContext>();
 

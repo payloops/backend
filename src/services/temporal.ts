@@ -1,8 +1,7 @@
 import { createClient, type TFNClient } from '@astami/temporal-functions/client';
 import { context, propagation } from '@opentelemetry/api';
 import { env } from '../lib/env';
-import { logger } from '../lib/logger';
-import { getCorrelationContext } from '../lib/observability/context';
+import { logger, getCorrelationContext } from '@payloops/observability';
 
 let tfnClient: TFNClient | null = null;
 

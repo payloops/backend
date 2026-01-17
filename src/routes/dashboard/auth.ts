@@ -7,7 +7,7 @@ import { merchants } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { signJWT } from '../../lib/jwt';
 import { generateWebhookSecret } from '../../lib/crypto';
-import { logger } from '../../lib/logger';
+import { logger } from '@payloops/observability';
 
 const app = new Hono();
 

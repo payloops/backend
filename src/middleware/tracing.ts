@@ -4,9 +4,9 @@ import type { Logger } from 'pino';
 import {
   extractCorrelationId,
   withCorrelationContext,
-  CORRELATION_ID_HEADER
-} from '../lib/observability/context';
-import { logger } from '../lib/logger';
+  CORRELATION_ID_HEADER,
+  logger
+} from '@payloops/observability';
 
 const tracer = trace.getTracer('loop-backend');
 
