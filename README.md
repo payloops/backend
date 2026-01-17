@@ -96,14 +96,14 @@ Authenticated via `Authorization: Bearer <jwt>` header.
 ### Prerequisites
 
 - Node.js 22+
-- pnpm
+- npm
 - PostgreSQL (via Docker or local)
 
 ### Setup
 
 ```bash
 # Install dependencies
-pnpm install
+npm install
 
 # Copy environment template
 cp .env.example .env
@@ -112,25 +112,25 @@ cp .env.example .env
 docker-compose up -d postgres
 
 # Push schema to database
-pnpm db:push
+npm db:push
 
 # Start development server
-pnpm dev
+npm dev
 ```
 
 ### Available Scripts
 
 | Command | Description |
 |---------|-------------|
-| `pnpm dev` | Start dev server with hot reload |
-| `pnpm build` | Build for production |
-| `pnpm start` | Run production build |
-| `pnpm typecheck` | Run TypeScript compiler |
-| `pnpm lint` | Run ESLint |
-| `pnpm db:generate` | Generate migration files |
-| `pnpm db:migrate` | Run pending migrations |
-| `pnpm db:push` | Push schema directly (dev only) |
-| `pnpm db:studio` | Open Drizzle Studio GUI |
+| `npm dev` | Start dev server with hot reload |
+| `npm build` | Build for production |
+| `npm start` | Run production build |
+| `npm typecheck` | Run TypeScript compiler |
+| `npm lint` | Run ESLint |
+| `npm db:generate` | Generate migration files |
+| `npm db:migrate` | Run pending migrations |
+| `npm db:push` | Push schema directly (dev only) |
+| `npm db:studio` | Open Drizzle Studio GUI |
 
 ## Configuration
 
