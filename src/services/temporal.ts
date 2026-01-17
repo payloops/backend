@@ -1,27 +1,32 @@
-import { Client, Connection } from '@temporalio/client';
+import { createClient, type TFNClient } from '@astami/temporal-functions/client';
 import { context, propagation } from '@opentelemetry/api';
 import { env } from '../lib/env';
 import { logger } from '../lib/logger';
 import { getCorrelationContext } from '../lib/observability/context';
 
-let client: Client | null = null;
+let tfnClient: TFNClient | null = null;
 
-export async function getTemporalClient(): Promise<Client> {
-  if (client) return client;
+// Get or create the TFN client (singleton)
+export function getTemporalClient(): TFNClient {
+  if (tfnClient) return tfnClient;
 
-  const connection = await Connection.connect({
-    address: env.TEMPORAL_ADDRESS
+  tfnClient = createClient({
+    temporal: {
+      address: env.TEMPORAL_ADDRESS,
+      namespace: env.TEMPORAL_NAMESPACE
+    }
   });
 
-  client = new Client({
-    connection,
-    namespace: env.TEMPORAL_NAMESPACE
-  });
+  logger.info({ address: env.TEMPORAL_ADDRESS }, 'Created Temporal Functions client');
 
-  logger.info({ address: env.TEMPORAL_ADDRESS }, 'Connected to Temporal');
-
-  return client;
+  return tfnClient;
 }
+
+// Map processor names to their task queues
+const PROCESSOR_TASK_QUEUES: Record<string, string> = {
+  stripe: 'stripe-payments',
+  razorpay: 'razorpay-payments'
+};
 
 export interface StartPaymentWorkflowInput {
   orderId: string;
@@ -33,34 +38,47 @@ export interface StartPaymentWorkflowInput {
 }
 
 export async function startPaymentWorkflow(input: StartPaymentWorkflowInput): Promise<string> {
-  const temporal = await getTemporalClient();
+  const client = getTemporalClient();
   const correlationCtx = getCorrelationContext();
 
   const workflowId = `payment-${input.orderId}`;
+  const taskQueue = PROCESSOR_TASK_QUEUES[input.processor] || 'stripe-payments';
 
   // Propagate trace context
   const carrier: Record<string, string> = {};
   propagation.inject(context.active(), carrier);
 
-  const handle = await temporal.workflow.start('PaymentWorkflow', {
-    taskQueue: 'payment-queue',
-    workflowId,
-    args: [input],
-    searchAttributes: {
-      CorrelationId: [correlationCtx?.correlationId || ''],
-      MerchantId: [input.merchantId],
-      OrderId: [input.orderId]
+  // Start workflow using TFN client
+  const handle = await client.start(
+    {
+      name: 'PaymentWorkflow',
+      handler: async () => {}, // Placeholder - actual implementation is in the worker
+      options: { taskQueue },
+      __type: 'workflow' as const
     },
-    memo: {
-      traceContext: carrier,
-      correlationId: correlationCtx?.correlationId
+    {
+      orderId: input.orderId,
+      merchantId: input.merchantId,
+      amount: input.amount,
+      currency: input.currency,
+      returnUrl: input.returnUrl
+    },
+    {
+      workflowId,
+      taskQueue,
+      memo: {
+        traceContext: carrier,
+        correlationId: correlationCtx?.correlationId
+      }
     }
-  });
+  );
 
   logger.info(
     {
-      workflowId,
+      workflowId: handle.workflowId,
       orderId: input.orderId,
+      processor: input.processor,
+      taskQueue,
       correlationId: correlationCtx?.correlationId
     },
     'Started payment workflow'
@@ -72,43 +90,92 @@ export async function startPaymentWorkflow(input: StartPaymentWorkflowInput): Pr
 export interface StartWebhookDeliveryInput {
   webhookEventId: string;
   merchantId: string;
+  processor: string;
   webhookUrl: string;
   payload: Record<string, unknown>;
 }
 
 export async function startWebhookDeliveryWorkflow(input: StartWebhookDeliveryInput): Promise<string> {
-  const temporal = await getTemporalClient();
+  const client = getTemporalClient();
   const correlationCtx = getCorrelationContext();
 
   const workflowId = `webhook-${input.webhookEventId}`;
+  const taskQueue = PROCESSOR_TASK_QUEUES[input.processor] || 'stripe-payments';
 
   // Propagate trace context
   const carrier: Record<string, string> = {};
   propagation.inject(context.active(), carrier);
 
-  const handle = await temporal.workflow.start('WebhookDeliveryWorkflow', {
-    taskQueue: 'webhook-queue',
-    workflowId,
-    args: [input],
-    searchAttributes: {
-      CorrelationId: [correlationCtx?.correlationId || ''],
-      MerchantId: [input.merchantId],
-      WebhookEventId: [input.webhookEventId]
+  // Start workflow using TFN client
+  const handle = await client.start(
+    {
+      name: 'WebhookDeliveryWorkflow',
+      handler: async () => {}, // Placeholder - actual implementation is in the worker
+      options: { taskQueue },
+      __type: 'workflow' as const
     },
-    memo: {
-      traceContext: carrier,
-      correlationId: correlationCtx?.correlationId
+    {
+      webhookEventId: input.webhookEventId,
+      merchantId: input.merchantId,
+      webhookUrl: input.webhookUrl,
+      payload: input.payload
+    },
+    {
+      workflowId,
+      taskQueue,
+      memo: {
+        traceContext: carrier,
+        correlationId: correlationCtx?.correlationId
+      }
     }
-  });
+  );
 
   logger.info(
     {
-      workflowId,
+      workflowId: handle.workflowId,
       webhookEventId: input.webhookEventId,
+      processor: input.processor,
+      taskQueue,
       correlationId: correlationCtx?.correlationId
     },
     'Started webhook delivery workflow'
   );
 
   return handle.workflowId;
+}
+
+// Signal a payment workflow (e.g., for 3DS completion)
+export async function signalPaymentCompletion(
+  orderId: string,
+  result: { success: boolean; processorTransactionId?: string }
+): Promise<void> {
+  const client = getTemporalClient();
+  const workflowId = `payment-${orderId}`;
+
+  await client.signal(workflowId, 'completePayment', result);
+
+  logger.info(
+    {
+      workflowId,
+      orderId,
+      success: result.success
+    },
+    'Signaled payment completion'
+  );
+}
+
+// Cancel a payment workflow
+export async function cancelPaymentWorkflow(orderId: string): Promise<void> {
+  const client = getTemporalClient();
+  const workflowId = `payment-${orderId}`;
+
+  await client.signal(workflowId, 'cancelPayment', {});
+
+  logger.info(
+    {
+      workflowId,
+      orderId
+    },
+    'Signaled payment cancellation'
+  );
 }
