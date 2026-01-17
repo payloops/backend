@@ -23,7 +23,6 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
     "@opentelemetry/sdk-node": "^0.57.0",
     "@opentelemetry/semantic-conventions": "^1.28.0",
-    "@temporalio/client": "^1.11.7",
     "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.39.1",
     "hono": "^4.7.4",
