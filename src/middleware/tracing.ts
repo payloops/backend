@@ -1,11 +1,11 @@
 import { createMiddleware } from 'hono/factory';
 import { trace, SpanKind, SpanStatusCode, context } from '@opentelemetry/api';
-import type { Logger } from 'pino';
 import {
   extractCorrelationId,
   withCorrelationContext,
   CORRELATION_ID_HEADER,
-  logger
+  logger,
+  type Logger
 } from '@payloops/observability';
 
 const tracer = trace.getTracer('loop-backend');
