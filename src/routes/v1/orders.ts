@@ -85,21 +85,26 @@ app.get('/:id', async (c) => {
   });
 });
 
-const payOrderSchema = z.object({
-  processor: z.enum(['stripe', 'razorpay']).optional(),
-  paymentMethod: z.object({
-    type: z.enum(['card', 'upi', 'netbanking', 'wallet']),
-    token: z.string().optional(), // Processor token/payment method id
-    card: z
+const payOrderSchema = z
+  .object({
+    processor: z.enum(['stripe', 'razorpay']).optional(),
+    paymentMethod: z
       .object({
-        number: z.string(),
-        expMonth: z.number(),
-        expYear: z.number(),
-        cvc: z.string()
+        type: z.enum(['card', 'upi', 'netbanking', 'wallet']),
+        token: z.string().optional(), // Processor token/payment method id
+        card: z
+          .object({
+            number: z.string(),
+            expMonth: z.number(),
+            expYear: z.number(),
+            cvc: z.string()
+          })
+          .optional()
       })
       .optional()
   })
-});
+  .optional()
+  .default({});
 
 // Process payment
 app.post('/:id/pay', zValidator('json', payOrderSchema), async (c) => {
@@ -136,10 +141,10 @@ app.post('/:id/pay', zValidator('json', payOrderSchema), async (c) => {
     // Simple routing: INR -> Razorpay, else -> Stripe
     if (order.currency === 'INR') {
       const razorpayConfig = configs.find((c) => c.processor === 'razorpay');
-      processor = razorpayConfig ? 'razorpay' : configs[0].processor;
+      processor = razorpayConfig ? 'razorpay' : (configs[0].processor as 'stripe' | 'razorpay');
     } else {
       const stripeConfig = configs.find((c) => c.processor === 'stripe');
-      processor = stripeConfig ? 'stripe' : configs[0].processor;
+      processor = stripeConfig ? 'stripe' : (configs[0].processor as 'stripe' | 'razorpay');
     }
   }
 
@@ -257,6 +262,34 @@ app.post('/:id/refund', zValidator('json', refundSchema), async (c) => {
     amount: refundAmount,
     status: 'pending'
   }, 201);
+});
+
+// Get order refunds
+app.get('/:id/refunds', async (c) => {
+  const merchant = getMerchant(c);
+  const orderId = c.req.param('id');
+
+  const order = await db.query.orders.findFirst({
+    where: and(eq(orders.id, orderId), eq(orders.merchantId, merchant.id))
+  });
+
+  if (!order) {
+    return c.json({ code: 'not_found', message: 'Order not found' }, 404);
+  }
+
+  const refunds = await db.query.transactions.findMany({
+    where: and(eq(transactions.orderId, orderId), eq(transactions.type, 'refund')),
+    orderBy: [desc(transactions.createdAt)]
+  });
+
+  return c.json(
+    refunds.map((r) => ({
+      refundId: r.id,
+      orderId: r.orderId,
+      amount: r.amount,
+      status: r.status
+    }))
+  );
 });
 
 export default app;

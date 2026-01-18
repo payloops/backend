@@ -5,7 +5,7 @@ import { orders, transactions, webhookEvents, processorConfigs } from '../../db/
 import { eq, and } from 'drizzle-orm';
 import { decrypt } from '../../lib/crypto';
 import { logger } from '@payloops/observability';
-import { startWebhookDeliveryWorkflow } from '../../services/temporal';
+import { startWebhookDeliveryWorkflow, signalPaymentCompletion } from '../../services/temporal';
 
 const app = new Hono();
 
@@ -85,23 +85,28 @@ async function processStripeEvent(event: Stripe.Event, merchantId: string, order
     case 'payment_intent.succeeded': {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       if (orderId) {
-        await db
-          .update(orders)
-          .set({
-            status: 'captured',
-            processorOrderId: paymentIntent.id,
-            updatedAt: new Date()
-          })
-          .where(eq(orders.id, orderId));
-
-        await db.insert(transactions).values({
-          orderId,
-          type: 'capture',
-          amount: paymentIntent.amount,
-          status: 'success',
-          processorTransactionId: paymentIntent.id,
-          processorResponse: paymentIntent as unknown as Record<string, unknown>
+        // Check if order has an active workflow (requires_action status means waiting for 3DS)
+        const order = await db.query.orders.findFirst({
+          where: eq(orders.id, orderId)
         });
+
+        if (order?.workflowId && order.status === 'requires_action') {
+          // Signal the workflow to complete - workflow will handle DB updates
+          try {
+            await signalPaymentCompletion(orderId, {
+              success: true,
+              processorTransactionId: paymentIntent.id
+            });
+            logger.info({ orderId, workflowId: order.workflowId }, 'Signaled payment completion to workflow');
+          } catch (error) {
+            // Workflow might have already completed or timed out - update DB directly
+            logger.warn({ orderId, error }, 'Failed to signal workflow, updating DB directly');
+            await updateOrderStatusDirectly(orderId, 'captured', paymentIntent);
+          }
+        } else {
+          // No active workflow waiting - update directly (e.g., direct charge without 3DS)
+          await updateOrderStatusDirectly(orderId, 'captured', paymentIntent);
+        }
       }
       break;
     }
@@ -109,28 +114,31 @@ async function processStripeEvent(event: Stripe.Event, merchantId: string, order
     case 'payment_intent.payment_failed': {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       if (orderId) {
-        await db
-          .update(orders)
-          .set({
-            status: 'failed',
-            updatedAt: new Date()
-          })
-          .where(eq(orders.id, orderId));
-
-        await db.insert(transactions).values({
-          orderId,
-          type: 'authorization',
-          amount: paymentIntent.amount,
-          status: 'failed',
-          processorTransactionId: paymentIntent.id,
-          errorCode: paymentIntent.last_payment_error?.code,
-          errorMessage: paymentIntent.last_payment_error?.message
+        const order = await db.query.orders.findFirst({
+          where: eq(orders.id, orderId)
         });
+
+        if (order?.workflowId && order.status === 'requires_action') {
+          // Signal the workflow to fail
+          try {
+            await signalPaymentCompletion(orderId, {
+              success: false,
+              processorTransactionId: paymentIntent.id
+            });
+            logger.info({ orderId, workflowId: order.workflowId }, 'Signaled payment failure to workflow');
+          } catch (error) {
+            logger.warn({ orderId, error }, 'Failed to signal workflow, updating DB directly');
+            await updateOrderFailedDirectly(orderId, paymentIntent);
+          }
+        } else {
+          await updateOrderFailedDirectly(orderId, paymentIntent);
+        }
       }
       break;
     }
 
     case 'charge.refunded': {
+      // Refunds don't use workflows - update directly
       const charge = event.data.object as Stripe.Charge;
       if (orderId) {
         const refundAmount = charge.amount_refunded;
@@ -189,10 +197,56 @@ async function processStripeEvent(event: Stripe.Event, merchantId: string, order
     await startWebhookDeliveryWorkflow({
       webhookEventId: webhookEvent[0].id,
       merchantId,
+      processor: 'stripe',
       webhookUrl: order.merchant.webhookUrl,
       payload: webhookEvent[0].payload as Record<string, unknown>
     });
   }
+}
+
+// Helper function for direct DB updates when no workflow is waiting
+async function updateOrderStatusDirectly(
+  orderId: string,
+  status: string,
+  paymentIntent: Stripe.PaymentIntent
+) {
+  await db
+    .update(orders)
+    .set({
+      status,
+      processorOrderId: paymentIntent.id,
+      updatedAt: new Date()
+    })
+    .where(eq(orders.id, orderId));
+
+  await db.insert(transactions).values({
+    orderId,
+    type: 'capture',
+    amount: paymentIntent.amount,
+    status: 'success',
+    processorTransactionId: paymentIntent.id,
+    processorResponse: paymentIntent as unknown as Record<string, unknown>
+  });
+}
+
+async function updateOrderFailedDirectly(orderId: string, paymentIntent: Stripe.PaymentIntent) {
+  await db
+    .update(orders)
+    .set({
+      status: 'failed',
+      updatedAt: new Date()
+    })
+    .where(eq(orders.id, orderId));
+
+  await db.insert(transactions).values({
+    orderId,
+    type: 'authorization',
+    amount: paymentIntent.amount,
+    status: 'failed',
+    processorTransactionId: paymentIntent.id,
+    errorCode: paymentIntent.last_payment_error?.code,
+    errorMessage: paymentIntent.last_payment_error?.message
+  });
 }
 
 export default app;

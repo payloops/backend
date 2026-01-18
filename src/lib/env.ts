@@ -9,6 +9,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   ENCRYPTION_KEY: z.string().min(32),
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
+  CHECKOUT_BASE_URL: z.string().default('http://localhost:5173'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default('http://localhost:4318'),
   OTEL_SERVICE_NAME: z.string().default('loop-backend')
 });

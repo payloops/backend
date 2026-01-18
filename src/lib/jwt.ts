@@ -3,7 +3,7 @@ import { env } from './env';
 
 const secret = new TextEncoder().encode(env.JWT_SECRET);
 
-export interface JWTPayload {
+export interface JWTPayload extends jose.JWTPayload {
   sub: string; // merchant id
   email: string;
 }

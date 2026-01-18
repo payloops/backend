@@ -5,7 +5,7 @@ import { orders, transactions, webhookEvents, processorConfigs } from '../../db/
 import { eq, and } from 'drizzle-orm';
 import { decrypt } from '../../lib/crypto';
 import { logger } from '@payloops/observability';
-import { startWebhookDeliveryWorkflow } from '../../services/temporal';
+import { startWebhookDeliveryWorkflow, signalPaymentCompletion } from '../../services/temporal';
 
 const app = new Hono();
 
@@ -115,23 +115,28 @@ async function processRazorpayEvent(
     case 'payment.captured': {
       const payment = payload.payload.payment!.entity;
       if (orderId) {
-        await db
-          .update(orders)
-          .set({
-            status: 'captured',
-            processorOrderId: payment.id,
-            updatedAt: new Date()
-          })
-          .where(eq(orders.id, orderId));
-
-        await db.insert(transactions).values({
-          orderId,
-          type: 'capture',
-          amount: payment.amount,
-          status: 'success',
-          processorTransactionId: payment.id,
-          processorResponse: payment as unknown as Record<string, unknown>
+        // Check if order has an active workflow (requires_action status means waiting for 3DS/redirect)
+        const order = await db.query.orders.findFirst({
+          where: eq(orders.id, orderId)
         });
+
+        if (order?.workflowId && order.status === 'requires_action') {
+          // Signal the workflow to complete - workflow will handle DB updates
+          try {
+            await signalPaymentCompletion(orderId, {
+              success: true,
+              processorTransactionId: payment.id
+            });
+            logger.info({ orderId, workflowId: order.workflowId }, 'Signaled payment completion to workflow');
+          } catch (error) {
+            // Workflow might have already completed or timed out - update DB directly
+            logger.warn({ orderId, error }, 'Failed to signal workflow, updating DB directly');
+            await updateOrderStatusDirectly(orderId, 'captured', payment);
+          }
+        } else {
+          // No active workflow waiting - update directly (e.g., direct charge without 3DS)
+          await updateOrderStatusDirectly(orderId, 'captured', payment);
+        }
       }
       break;
     }
@@ -139,23 +144,25 @@ async function processRazorpayEvent(
     case 'payment.failed': {
       const payment = payload.payload.payment!.entity;
       if (orderId) {
-        await db
-          .update(orders)
-          .set({
-            status: 'failed',
-            updatedAt: new Date()
-          })
-          .where(eq(orders.id, orderId));
-
-        await db.insert(transactions).values({
-          orderId,
-          type: 'authorization',
-          amount: payment.amount,
-          status: 'failed',
-          processorTransactionId: payment.id,
-          errorCode: payment.error_code,
-          errorMessage: payment.error_description
+        const order = await db.query.orders.findFirst({
+          where: eq(orders.id, orderId)
         });
+
+        if (order?.workflowId && order.status === 'requires_action') {
+          // Signal the workflow to fail
+          try {
+            await signalPaymentCompletion(orderId, {
+              success: false,
+              processorTransactionId: payment.id
+            });
+            logger.info({ orderId, workflowId: order.workflowId }, 'Signaled payment failure to workflow');
+          } catch (error) {
+            logger.warn({ orderId, error }, 'Failed to signal workflow, updating DB directly');
+            await updateOrderFailedDirectly(orderId, payment);
+          }
+        } else {
+          await updateOrderFailedDirectly(orderId, payment);
+        }
       }
       break;
     }
@@ -225,10 +232,63 @@ async function processRazorpayEvent(
     await startWebhookDeliveryWorkflow({
       webhookEventId: webhookEvent[0].id,
       merchantId,
+      processor: 'razorpay',
       webhookUrl: order.merchant.webhookUrl,
       payload: webhookEvent[0].payload as Record<string, unknown>
     });
   }
+}
+
+// Helper function for direct DB updates when no workflow is waiting
+interface RazorpayPaymentEntity {
+  id: string;
+  amount: number;
+  error_code?: string;
+  error_description?: string;
+}
+
+async function updateOrderStatusDirectly(
+  orderId: string,
+  status: string,
+  payment: RazorpayPaymentEntity
+) {
+  await db
+    .update(orders)
+    .set({
+      status,
+      processorOrderId: payment.id,
+      updatedAt: new Date()
+    })
+    .where(eq(orders.id, orderId));
+
+  await db.insert(transactions).values({
+    orderId,
+    type: 'capture',
+    amount: payment.amount,
+    status: 'success',
+    processorTransactionId: payment.id,
+    processorResponse: payment as unknown as Record<string, unknown>
+  });
+}
+
+async function updateOrderFailedDirectly(orderId: string, payment: RazorpayPaymentEntity) {
+  await db
+    .update(orders)
+    .set({
+      status: 'failed',
+      updatedAt: new Date()
+    })
+    .where(eq(orders.id, orderId));
+
+  await db.insert(transactions).values({
+    orderId,
+    type: 'authorization',
+    amount: payment.amount,
+    status: 'failed',
+    processorTransactionId: payment.id,
+    errorCode: payment.error_code,
+    errorMessage: payment.error_description
+  });
 }
 
 export default app;

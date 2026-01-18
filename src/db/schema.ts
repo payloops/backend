@@ -97,6 +97,33 @@ export const transactions = pgTable(
   (table) => [index('transactions_order_id_idx').on(table.orderId)]
 );
 
+export const checkoutSessions = pgTable(
+  'checkout_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    merchantId: uuid('merchant_id')
+      .notNull()
+      .references(() => merchants.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    amount: integer('amount').notNull(),
+    currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+    status: varchar('status', { length: 50 }).notNull().default('pending'),
+    successUrl: text('success_url').notNull(),
+    cancelUrl: text('cancel_url').notNull(),
+    customerId: varchar('customer_id', { length: 255 }),
+    customerEmail: varchar('customer_email', { length: 255 }),
+    metadata: jsonb('metadata').default({}),
+    lineItems: jsonb('line_items').default([]),
+    expiresAt: timestamp('expires_at').notNull(),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull()
+  },
+  (table) => [
+    index('checkout_sessions_merchant_id_idx').on(table.merchantId),
+    index('checkout_sessions_status_idx').on(table.status)
+  ]
+);
+
 export const webhookEvents = pgTable(
   'webhook_events',
   {
@@ -150,7 +177,19 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     references: [merchants.id]
   }),
   transactions: many(transactions),
-  webhookEvents: many(webhookEvents)
+  webhookEvents: many(webhookEvents),
+  checkoutSessions: many(checkoutSessions)
+}));
+
+export const checkoutSessionsRelations = relations(checkoutSessions, ({ one }) => ({
+  merchant: one(merchants, {
+    fields: [checkoutSessions.merchantId],
+    references: [merchants.id]
+  }),
+  order: one(orders, {
+    fields: [checkoutSessions.orderId],
+    references: [orders.id]
+  })
 }));
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
@@ -180,3 +219,5 @@ export type Transaction = typeof transactions.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type ProcessorConfig = typeof processorConfigs.$inferSelect;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
+export type CheckoutSession = typeof checkoutSessions.$inferSelect;
+export type NewCheckoutSession = typeof checkoutSessions.$inferInsert;

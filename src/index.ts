@@ -15,6 +15,7 @@ import { tracingMiddleware, type TracingContext } from './middleware/tracing';
 import authRoutes from './routes/dashboard/auth';
 import merchantRoutes from './routes/dashboard/merchants';
 import orderRoutes from './routes/v1/orders';
+import checkoutRoutes from './routes/v1/checkout';
 import stripeWebhooks from './routes/webhooks/stripe';
 import razorpayWebhooks from './routes/webhooks/razorpay';
 
@@ -51,6 +52,7 @@ app.route('/api', merchantRoutes);
 // Public API routes (API key auth)
 app.use('/v1/*', authMiddleware);
 app.route('/v1/orders', orderRoutes);
+app.route('/v1/checkout', checkoutRoutes);
 
 // Webhook routes (signature verification)
 app.route('/webhooks/stripe', stripeWebhooks);
