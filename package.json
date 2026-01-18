@@ -33,6 +33,7 @@
     "@types/pg": "^8.11.10",
     "drizzle-kit": "^0.30.4",
     "eslint": "^9.0.0",
+    "pino-pretty": "^13.0.0",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3"
