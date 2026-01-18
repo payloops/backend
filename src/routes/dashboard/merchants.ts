@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { db } from '../../db/client';
-import { merchants, apiKeys, processorConfigs, orders, transactions } from '../../db/schema';
+import { merchants, apiKeys, processorConfigs, orders, transactions, webhookEvents } from '../../db/schema';
 import { eq, and, desc, sql, gte, count, sum } from 'drizzle-orm';
 import type { AuthContext } from '../../middleware/auth';
 import { getMerchant, authMiddleware } from '../../middleware/auth';
@@ -365,6 +365,79 @@ app.delete('/processors/:processor', async (c) => {
     .where(and(eq(processorConfigs.merchantId, merchant.id), eq(processorConfigs.processor, processor)));
 
   return c.body(null, 204);
+});
+
+// Webhook events
+app.get('/webhooks', async (c) => {
+  const merchant = getMerchant(c);
+  const page = parseInt(c.req.query('page') || '1');
+  const limit = Math.min(parseInt(c.req.query('limit') || '25'), 100);
+  const status = c.req.query('status');
+
+  const offset = (page - 1) * limit;
+
+  let whereClause = eq(webhookEvents.merchantId, merchant.id);
+  if (status) {
+    whereClause = and(whereClause, eq(webhookEvents.status, status)) as typeof whereClause;
+  }
+
+  const [eventsList, totalResult] = await Promise.all([
+    db.query.webhookEvents.findMany({
+      where: whereClause,
+      orderBy: [desc(webhookEvents.createdAt)],
+      limit,
+      offset
+    }),
+    db.select({ count: count() }).from(webhookEvents).where(whereClause)
+  ]);
+
+  const total = totalResult[0].count;
+
+  return c.json({
+    data: eventsList.map((e) => ({
+      id: e.id,
+      orderId: e.orderId,
+      eventType: e.eventType,
+      status: e.status,
+      attempts: e.attempts,
+      lastAttemptAt: e.lastAttemptAt,
+      deliveredAt: e.deliveredAt,
+      createdAt: e.createdAt
+    })),
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
+});
+
+app.post('/webhooks/:id/retry', async (c) => {
+  const merchant = getMerchant(c);
+  const id = c.req.param('id');
+
+  // Verify the webhook belongs to this merchant
+  const event = await db.query.webhookEvents.findFirst({
+    where: and(eq(webhookEvents.id, id), eq(webhookEvents.merchantId, merchant.id))
+  });
+
+  if (!event) {
+    return c.json({ code: 'not_found', message: 'Webhook event not found' }, 404);
+  }
+
+  // Reset the status for retry
+  await db
+    .update(webhookEvents)
+    .set({
+      status: 'pending',
+      nextRetryAt: new Date()
+    })
+    .where(eq(webhookEvents.id, id));
+
+  logger.info({ merchantId: merchant.id, webhookEventId: id }, 'Webhook retry requested');
+
+  return c.json({ success: true });
 });
 
 export default app;
