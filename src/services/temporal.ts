@@ -1,11 +1,17 @@
 import { createClient, type TFNClient } from '@astami/temporal-functions/client';
-import { context, propagation } from '@opentelemetry/api';
-import { env } from '../lib/env';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
+import { trace, context } from '@opentelemetry/api';
+import { env } from '../lib/env.js';
 import { logger, getCorrelationContext } from '@payloops/observability';
 
 let tfnClient: TFNClient | null = null;
 
-// Get or create the TFN client (singleton)
+/**
+ * Get or create the Temporal Functions client (singleton)
+ *
+ * Uses OpenTelemetryWorkflowClientInterceptor to automatically propagate
+ * trace context from the backend API to Temporal workflows.
+ */
 export function getTemporalClient(): TFNClient {
   if (tfnClient) return tfnClient;
 
@@ -13,10 +19,14 @@ export function getTemporalClient(): TFNClient {
     temporal: {
       address: env.TEMPORAL_ADDRESS,
       namespace: env.TEMPORAL_NAMESPACE
-    }
+    },
+    // OpenTelemetry interceptor injects trace context into workflow headers
+    interceptors: {
+      workflow: [new OpenTelemetryWorkflowClientInterceptor()],
+    },
   });
 
-  logger.info({ address: env.TEMPORAL_ADDRESS }, 'Created Temporal Functions client');
+  logger.info({ address: env.TEMPORAL_ADDRESS }, 'Created Temporal Functions client with OTel interceptors');
 
   return tfnClient;
 }
@@ -40,14 +50,24 @@ export async function startPaymentWorkflow(input: StartPaymentWorkflowInput): Pr
   const client = getTemporalClient();
   const correlationCtx = getCorrelationContext();
 
+  // Debug: Check if OTel span context is active
+  const activeSpan = trace.getSpan(context.active());
+  const spanContext = activeSpan?.spanContext();
+  logger.info(
+    {
+      hasActiveSpan: !!activeSpan,
+      traceId: spanContext?.traceId,
+      spanId: spanContext?.spanId,
+      isValid: spanContext ? trace.isSpanContextValid(spanContext) : false
+    },
+    'Debug: OTel context before starting workflow'
+  );
+
   const workflowId = `payment-${input.orderId}`;
   const taskQueue = PROCESSOR_TASK_QUEUES[input.processor] || 'stripe-payments';
 
-  // Propagate trace context
-  const carrier: Record<string, string> = {};
-  propagation.inject(context.active(), carrier);
-
   // Start workflow using TFN client
+  // Trace context is automatically propagated via OpenTelemetryWorkflowClientInterceptor
   const handle = await client.start(
     {
       name: 'PaymentWorkflow',
@@ -66,7 +86,6 @@ export async function startPaymentWorkflow(input: StartPaymentWorkflowInput): Pr
       workflowId,
       taskQueue,
       memo: {
-        traceContext: carrier,
         correlationId: correlationCtx?.correlationId
       }
     }
@@ -101,11 +120,8 @@ export async function startWebhookDeliveryWorkflow(input: StartWebhookDeliveryIn
   const workflowId = `webhook-${input.webhookEventId}`;
   const taskQueue = PROCESSOR_TASK_QUEUES[input.processor] || 'stripe-payments';
 
-  // Propagate trace context
-  const carrier: Record<string, string> = {};
-  propagation.inject(context.active(), carrier);
-
   // Start workflow using TFN client
+  // Trace context is automatically propagated via OpenTelemetryWorkflowClientInterceptor
   const handle = await client.start(
     {
       name: 'WebhookDeliveryWorkflow',
@@ -123,7 +139,6 @@ export async function startWebhookDeliveryWorkflow(input: StartWebhookDeliveryIn
       workflowId,
       taskQueue,
       memo: {
-        traceContext: carrier,
         correlationId: correlationCtx?.correlationId
       }
     }

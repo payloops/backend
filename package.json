@@ -14,10 +14,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@astami/temporal-functions": "^0.2.1",
+    "@astami/temporal-functions": "^0.3.1",
     "@hono/node-server": "^1.13.8",
     "@hono/zod-validator": "^0.4.3",
     "@payloops/observability": "^0.0.13",
+    "@temporalio/interceptors-opentelemetry": "^1.11.7",
     "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.39.1",
     "hono": "^4.7.4",
